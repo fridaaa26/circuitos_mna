@@ -3,15 +3,15 @@ mna_gui_with_canvas.py
 
 Interfaz gráfica para ingresar resistencias (R) y fuentes de voltaje (V),
 resolver el circuito por MNA (Modified Nodal Analysis), calcular corrientes
-en resistencias, y dibujar un diagrama tipo "Multisim-lite" usando Tkinter Canvas.
+en resistencias, y dibujar un diagrama usando Tkinter Canvas.
 
-Comentarios detallados en TODO: cada bloque tiene su propósito explicado.
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
 import numpy as np
 import math
+from PIL import Image, ImageTk
 
 # -------------------------
 # Utilidades y conversión
@@ -68,7 +68,7 @@ def construir_y_resolver(elementos):
     # 4) Construir matrices G (n x n), B (n x m), I (n x 1), E (m x 1)
     G = np.zeros((n, n))
     B = np.zeros((n, m))
-    I = np.zeros((n, 1))  # corrientes independientes (no usadas en este ejemplo)
+    I = np.zeros((n, 1))  # corrientes independientes 
     E = np.zeros((m, 1))
 
     # Llenar G y B
@@ -145,7 +145,7 @@ def construir_y_resolver(elementos):
             Va = Vn.get(np_, 0.0)
             Vb = Vn.get(nn_, 0.0)
             I_R = (Va - Vb) / val  # Ampers
-            P_R = I_R * I_R * val  # P = I^2 * R (positivo si absorbida)
+            P_R = I_R * I_R * val  # P = I^2 * R 
             corriente_resistencias.append(I_R)
             potencias_resistencias.append(P_R)
         elif tipo == "V":
@@ -160,102 +160,107 @@ def construir_y_resolver(elementos):
 
 class CircuitDrawer:
     """
-    Dibujo simplificado estilo Multisim:
+    Dibujo simplificado
     - Nodos en fila horizontal
     - Elementos representados como rectángulos (R) y círculos (V)
-    - Líneas rectas únicamente
     """
 
     def __init__(self, canvas, elementos):
         self.canvas = canvas
         self.elementos = elementos
         self.node_positions = {}
-        self.radius = 14  # radio de nodo
+        self.radius = 10  
         self.elem_width = 60
         self.elem_height = 20
 
     def compute_node_order(self):
-        # ordenar nodos según aparición (o número)
+        # Ordenar nodos según aparición
         nodos = set()
-        for t,np,nn,val in self.elementos:
+        for t, np, nn, val in self.elementos:
             nodos.add(np)
             nodos.add(nn)
         nodos = list(nodos)
         if 0 in nodos:
             nodos.remove(0)
         nodos.sort()
-        nodos = [0] + nodos  # tierra primero
+        nodos = [0] + nodos  # Tierra primero
         return nodos
 
     def assign_positions(self, nodos):
         canvas_width = int(self.canvas.winfo_width())
+        spacing = 220 
 
-        spacing = 180
-
-        # ancho total que ocuparán los nodos
+        # Ancho total que ocuparán los nodos
         total_width = spacing * (len(nodos) - 1)
+        
+        x_start = (canvas_width - total_width) // 2  
+        if x_start < 50: x_start = 50
 
-        # calcular x inicial para centrar
-        x_start = (canvas_width - total_width) // 2
-        if x_start < 20:
-            x_start = 20
-
-        y = 110  # más arriba para que el área de resultados tenga más espacio
+        y_base = 150  
 
         positions = {}
         for i, n in enumerate(nodos):
-            positions[n] = (x_start + i*spacing, y)
+            positions[n] = (x_start + i * spacing, y_base)
 
         self.node_positions = positions
 
-
     def draw_node(self, x, y, n):
-        self.canvas.create_oval(x-self.radius, y-self.radius,
-                                x+self.radius, y+self.radius,
-                                fill="white")
-        self.canvas.create_text(x, y, text=str(n))
+        self.canvas.create_oval(x - 5, y - 5, x + 5, y + 5, fill="black")
+        self.canvas.create_text(x, y - 15, text=f"N{n}", font=("Arial", 9, "bold"))
 
-    def draw_resistor(self, x1, y1, x2, y2, name, val):
+    def draw_wire_connection(self, x_node, y_node, x_comp, y_comp):
+        """Dibuja la 'patita' vertical desde el nodo hasta la altura del componente"""
+        self.canvas.create_line(x_node, y_node, x_node, y_comp, width=2)
+        # Un pequeño punto de soldadura en la intersección si hay desplazamiento vertical
+        if abs(y_node - y_comp) > 5:
+            r = 3
+            self.canvas.create_oval(x_node-r, y_comp-r, x_node+r, y_comp+r, fill="black")    
+
+    def draw_resistor(self, x1, x2, y_node, y_comp, name, val):
         midx = (x1 + x2) / 2
-        midy = (y1 + y2) / 2
+        # La altura (y) es fija en y_comp para el componente
+        
+        # 1. Patitas verticales
+        self.draw_wire_connection(x1, y_node, x1, y_comp)
+        self.draw_wire_connection(x2, y_node, x2, y_comp)
 
-        # rectángulo de elemento
+        # 2. Líneas horizontales hacia el componente
+        self.canvas.create_line(x1, y_comp, midx - self.elem_width/2, y_comp, width=2)
+        self.canvas.create_line(midx + self.elem_width/2, y_comp, x2, y_comp, width=2)
+
+        # 3. Rectángulo de elemento
         self.canvas.create_rectangle(
-            midx - self.elem_width/2, midy - self.elem_height/2,
-            midx + self.elem_width/2, midy + self.elem_height/2,
+            midx - self.elem_width/2, y_comp - self.elem_height/2,
+            midx + self.elem_width/2, y_comp + self.elem_height/2,
             fill="#fcecdc", outline="black"
         )
 
-        # etiqueta
-        self.canvas.create_text(midx, midy,
-                                text=f"{name}\n{format_val(val)}",
-                                font=("Arial", 10))
+        # 4. Etiquetas (Nombre arriba, valor abajo)
+        self.canvas.create_text(midx, y_comp - 18, text=name, font=("Arial", 10, "bold"), fill="blue")
+        self.canvas.create_text(midx, y_comp + 18, text=format_val(val), font=("Arial", 10))
 
-        # líneas de conexión
-        self.canvas.create_line(x1, y1, midx - self.elem_width/2, midy, width=2)
-        self.canvas.create_line(midx + self.elem_width/2, midy, x2, y2, width=2)
+    def draw_voltage(self, x1, x2, y_node, y_comp, name, val):
+        midx = (x1 + x2) / 2
+        r = 20  # Radio de la fuente
 
-    def draw_voltage(self, x1, y1, x2, y2, name, val):
-        midx = (x1 + x2)/2
-        midy = (y1 + y2)/2
+        # 1. Patitas verticales
+        self.draw_wire_connection(x1, y_node, x1, y_comp)
+        self.draw_wire_connection(x2, y_node, x2, y_comp)
 
-        r = 18  # radio del símbolo
+        # 2. Patitas horizontales
+        self.canvas.create_line(x1, y_comp, midx - r, y_comp, width=2)
+        self.canvas.create_line(midx + r, y_comp, x2, y_comp, width=2)
 
-        # línea
-        self.canvas.create_line(x1, y1, midx - r, midy, width=2)
-        self.canvas.create_line(midx + r, midy, x2, y2, width=2)
+        # 3. Círculo
+        self.canvas.create_oval(midx - r, y_comp - r, midx + r, y_comp + r, width=2, fill="white")
 
-        # círculo
-        self.canvas.create_oval(midx - r, midy - r, midx + r, midy + r, width=2)
+        # 4. Signos + y -
+        self.canvas.create_text(midx - 10, y_comp - 8, text="+", font=("Arial", 12, "bold"))
+        self.canvas.create_text(midx + 10, y_comp - 8, text="-", font=("Arial", 14, "bold"))
 
-        # etiquetas + y -
-        self.canvas.create_text(midx - 8, midy - 6, text="+", font=("Arial", 10))
-        self.canvas.create_text(midx + 8, midy + 6, text="-", font=("Arial", 10))
-
-        # etiqueta de la fuente
-        self.canvas.create_text(midx, midy + 30,
-                                text=f"{name}\n{format_val(val)}",
-                                font=("Arial", 10))
+        # 5. Etiquetas
+        self.canvas.create_text(midx, y_comp - 28, text=name, font=("Arial", 10, "bold"), fill="blue")
+        self.canvas.create_text(midx, y_comp + 28, text=format_val(val), font=("Arial", 10))
 
     def draw(self):
         self.canvas.delete("all")
@@ -263,19 +268,25 @@ class CircuitDrawer:
         if not self.elementos:
             return
 
-        # ordenar nodos y asignar posiciones
         nodos = self.compute_node_order()
         self.assign_positions(nodos)
 
-        # dibujar nodos
-        for n,(x,y) in self.node_positions.items():
-            self.draw_node(x,y,n)
+        # Dibujar línea base de nodos 
+        if len(nodos) > 1:
+            x_min = self.node_positions[nodos[0]][0]
+            x_max = self.node_positions[nodos[-1]][0]
+            y_base = self.node_positions[nodos[0]][1]
+            self.canvas.create_line(x_min, y_base, x_max, y_base, width=3, fill="#555")
 
-        # ----- AGRUPAR POR PARES DE NODO -----
+        # Dibujar puntos nodales
+        for n, (x, y) in self.node_positions.items():
+            self.draw_node(x, y, n)
+
+        # ----- AGRUPAR ELEMENTOS POR PARES DE NODO -----
         groups = {}
         for elem in self.elementos:
             t, np_, nn_, val = elem
-            key = tuple(sorted([np_, nn_]))
+            key = tuple(sorted([np_, nn_])) # Clave ordenada para agrupar sin importar dirección
             if key not in groups:
                 groups[key] = []
             groups[key].append(elem)
@@ -286,32 +297,32 @@ class CircuitDrawer:
 
         for key, elems in groups.items():
             np_, nn_ = key
-            x1, y1 = self.node_positions[np_]
-            x2, y2 = self.node_positions[nn_]
+            
+            # Verificar que existan en el diccionario de posiciones
+            if np_ not in self.node_positions or nn_ not in self.node_positions:
+                continue
+
+            x1, y_node = self.node_positions[np_]
+            x2, _ = self.node_positions[nn_]
 
             total = len(elems)
-            # separar pisos
-            # si hay 3 elementos:
-            # offsets = -40, 0, 40
-            # si hay 2 elementos:
-            # offsets = -20, +20
-            base_offset = -(total - 1) * 20
+            step_y = 100  # Espacio vertical entre componentes 
 
-            for i, (t, np_real, nn_real, val) in enumerate(elems):
-                offset = base_offset + i * 40
+            # Cálculo del offset inicial para centrar verticalmente
+            start_offset = -((total - 1) * step_y) / 2
 
-                y1o = y1 + offset
-                y2o = y2 + offset
+            for i, (t, np_orig, nn_orig, val) in enumerate(elems):
+                current_offset = start_offset + (i * step_y)
+                y_comp = y_node + current_offset
 
                 if t == "R":
-                    self.draw_resistor(x1, y1o, x2, y2o, f"R{rcount}", val)
+                    name = f"R{rcount}"
                     rcount += 1
-
+                    self.draw_resistor(x1, x2, y_node, y_comp, name, val)
                 elif t == "V":
-                    self.draw_voltage(x1, y1o, x2, y2o, f"V{vcount}", val)
+                    name = f"V{vcount}"
                     vcount += 1
-
-
+                    self.draw_voltage(x1, x2, y_node, y_comp, name, val)
 
 
 # Helper para formatear valores con prefijos para el dibujo
@@ -336,7 +347,7 @@ def format_val(v):
     else:
         return f"{v:.2e}"
 
-# -------------------------
+# ---------------------------
 # Interfaz principal (Tkinter)
 # -------------------------
 class MNA_GUI:
@@ -366,6 +377,30 @@ class MNA_GUI:
         )
         lbl_help = tk.Label(frm_help, text=help_text, justify="left", anchor="nw", font=("Arial", 10))
         lbl_help.pack(fill="both", expand=True)
+
+        #--------------Imagenes---------------------
+        try:
+            ruta_imagen1 = "formulario1.jpg"
+            # CORRECCIÓN: Usar ruta_imagen1
+            imagen_pil1 = Image.open(ruta_imagen1) 
+
+            base_width = 200
+            # CORRECCIÓN: Usar imagen_pil1 en todos los cálculos
+            w_percent = (base_width / float(imagen_pil1.size[0]))
+            h_size = int((float(imagen_pil1.size[1]) * float(w_percent)))
+            imagen_redimensionada1 = imagen_pil1.resize((base_width, h_size), Image.Resampling.LANCZOS)
+
+            self.foto_tk1 = ImageTk.PhotoImage(imagen_redimensionada1)
+            
+            lbl_imagen1 = tk.Label(frm_help, image=self.foto_tk1)
+            lbl_imagen1.pack(side="bottom", pady=(10, 20)) 
+
+        except Exception as e:
+            print(f"Error imagen 1: {e}")
+            lbl_error = tk.Label(frm_help, text="(formulario1.jpg no encontrada)", fg="red")
+            lbl_error.pack(side="bottom", pady=5)
+
+       
 
         # Ventana principal
         self.root = root
@@ -398,6 +433,9 @@ class MNA_GUI:
 
         btn_add = tk.Button(frm_top, text="Agregar elemento", command=self.agregar)
         btn_add.grid(row=1, column=4, padx=6)
+        btn_add = tk.Button(frm_top, text="Agregar elemento", command=self.agregar,
+                            bg="#0275d8", fg="white", font=("Arial", 9, "bold"))
+        btn_add.grid(row=1, column=4, padx=6)
 
         # ---------- Tabla (Treeview) de elementos ----------
         columns = ("tipo", "np", "nn", "val")
@@ -406,11 +444,28 @@ class MNA_GUI:
             self.tree.heading(c, text=c.upper())
         self.tree.pack(fill="x", padx=6, pady=6)
 
+
         # ---------- Canvas para dibujo ----------
-        canvas_frame = tk.Frame(root)
+        canvas_frame = tk.Frame(root, bd=2, relief="sunken")
         canvas_frame.pack(fill="both", expand=True, padx=6, pady=6)
-        self.canvas = tk.Canvas(canvas_frame, width=900, height=180, bg="white")
-        self.canvas.pack(side="left", fill="both", expand=True)
+        
+        #GRID
+        canvas_frame.grid_rowconfigure(0, weight=1)
+        canvas_frame.grid_columnconfigure(0, weight=1)
+
+        #barrita de desplazamiento
+        self.v_scroll = tk.Scrollbar(canvas_frame, orient="vertical")
+        self.h_scroll = tk.Scrollbar(canvas_frame, orient="horizontal")
+        self.canvas = tk.Canvas(canvas_frame, bg="white",
+                                yscrollcommand=self.v_scroll.set,
+                                xscrollcommand=self.h_scroll.set)
+        self.v_scroll.config(command=self.canvas.yview)
+        self.h_scroll.config(command=self.canvas.xview)
+
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.v_scroll.grid(row=0, column=1, sticky="ns")
+        self.h_scroll.grid(row=1, column=0, sticky="ew")
+
 
         # ====== Frame para botones de acciones ======
         frm_bottom = tk.Frame(root)
@@ -419,11 +474,23 @@ class MNA_GUI:
         # Botón para limpiar elementos
         btn_clear = tk.Button(frm_bottom, text="Limpiar elementos", command=self.limpiar, width=18)
         btn_clear.grid(row=0, column=0, padx=10)
+        btn_clear = tk.Button(frm_bottom, text="Limpiar elementos", command=self.limpiar, 
+                              width=18, bg="#f0ad4e", fg="white", font=("Arial", 9, "bold"))
+        btn_clear.grid(row=0, column=0, padx=10)
 
         btn_solve = tk.Button(frm_bottom, text="Resolver circuito (MNA)", command=self.resolver, width=18)
         btn_solve.grid(row=0, column=1, padx=10)
+        btn_solve = tk.Button(frm_bottom, text="Resolver circuito (MNA)", command=self.resolver, 
+                              width=20, bg="#5cb85c", fg="white", font=("Arial", 9, "bold"))
+        btn_solve.grid(row=0, column=1, padx=10)
 
-        # ====== RESULTADOS DEBAJO DEL CANVAS ======
+        btn_del_sel = tk.Button(frm_bottom, text="Eliminar seleccionado", command=self.eliminar_seleccionado, width=18)
+        btn_del_sel.grid(row=0, column=2, padx=10)
+        btn_del_sel = tk.Button(frm_bottom, text="Eliminar seleccionado", command=self.eliminar_seleccionado, 
+                                width=20, bg="#E88CCF", fg="white", font=("Arial", 9, "bold"))
+        btn_del_sel.grid(row=0, column=2, padx=10)
+
+        # ====== RESULTADOS ======
         self.results_frame = tk.Frame(root)
         self.results_frame.pack(fill="x", padx=10, pady=10)
 
@@ -460,6 +527,20 @@ class MNA_GUI:
         # Redibujar canvas
         self.redraw()
 
+    def eliminar_seleccionado(self):
+        selected_item = self.tree.selection() # Obtiene el ID del item seleccionado
+        
+        if not selected_item:
+            messagebox.showwarning("Para eliminar", "Selecciona un elemento de la lista para eliminarlo.")
+            return
+
+        #sacamos el indice item de la tabla
+        index = self.tree.index(selected_item)
+        del self.elementos[index] #elimina
+        self.tree.delete(selected_item)
+        self.result_text.delete("1.0", tk.END) #limpia
+        self.redraw()
+
     def limpiar(self):
         """Limpia lista de elementos, tabla y canvas"""
         self.elementos = []
@@ -469,9 +550,11 @@ class MNA_GUI:
         self.result_text.delete("1.0", tk.END)
 
     def redraw(self):
-        """Redibuja el circuito en el canvas usando CircuitDrawer"""
+        """Redibuja el circuito en el canvas usando CircuitDrawer y actualiza el scroll"""
         drawer = CircuitDrawer(self.canvas, self.elementos)
         drawer.draw()
+
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def resolver(self):
         """Llamar a la función de MNA, mostrar resultados y actualizar el dibujo si hace falta"""
@@ -521,7 +604,7 @@ class MNA_GUI:
                 self.result_text.insert(tk.END, f"R{r_idx+1}: I = {I_R:.6f} A   P = {P_R:.6f} W\n")
                 r_idx += 1
 
-        # Re-dibujar (opcional para actualizar etiquetas o estado)
+        # Re-dibujar 
         self.redraw()
 
 # -------------------------
